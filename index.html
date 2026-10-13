@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Top Layer Playground</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --fg: #1d2330; --muted: #677085; --card: #fff; --line: #d9dde5;
+    --c1: #4f6bed; --c2: #e0682b; --c3: #1f9d6b; --c4: #b0369e; --c5: #c79a12; --c6: #2a9fc4;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header { padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--card); }
+  header h1 { margin: 0 0 4px; font-size: 18px; }
+  header p { margin: 0; color: var(--muted); }
+  main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px 20px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 16px; }
+  section h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  button:hover { background: #eef0f5; }
+  button.primary { background: var(--fg); color: #fff; border-color: var(--fg); }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+  /* Stacking-context trap: high z-index + transform + overflow hidden */
+  .trap { position: relative; z-index: 999999; transform: translateZ(0); overflow: hidden;
+          border: 2px dashed #c33; border-radius: 8px; padding: 10px; background: #fff5f5; }
+  .zbanner { position: fixed; right: 16px; bottom: 16px; z-index: 2147483647; background: #c33; color: #fff;
+             padding: 10px 14px; border-radius: 8px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+
+  /* Side panel */
+  #stack { list-style: none; margin: 0; padding: 0; counter-reset: s; }
+  #stack li { padding: 6px 8px; border-left: 4px solid var(--c, #999); background: #f7f8fa; margin-bottom: 4px; border-radius: 4px;
+              font-family: ui-monospace, monospace; font-size: 12px; }
+  #stack li.empty { border-left-color: transparent; color: var(--muted); font-family: inherit; }
+  #log { height: 260px; overflow: auto; font: 12px/1.5 ui-monospace, monospace; background: #111722; color: #c9d3e6;
+         border-radius: 6px; padding: 8px; margin: 0; white-space: pre-wrap; }
+
+  /* Popovers */
+  [popover], dialog { border: 0; border-radius: 12px; padding: 0; color: var(--fg); background: #fff;
+             box-shadow: 0 20px 50px rgba(0,0,0,.28), 0 0 0 1px rgba(0,0,0,.06); overflow: auto; }
+  .pc { padding: 14px 16px; }
+  .pc h3 { margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .pc .tag { font: 11px ui-monospace, monospace; padding: 1px 6px; border-radius: 4px; background: #eef0f5; color: var(--muted); }
+  .pc p { margin: 0 0 10px; color: var(--muted); }
+  .pc .bar { height: 6px; border-radius: 6px 6px 0 0; background: var(--c); margin: -14px -16px 12px; }
+  [popover]::backdrop { background: transparent; }
+  [popover].dim::backdrop { background: rgba(10, 15, 30, .25); }
+  dialog::backdrop { background: rgba(10, 15, 30, .45); backdrop-filter: blur(2px); }
+
+  .xs  { width: 180px; }
+  .sm  { width: 260px; }
+  .md  { width: 380px; }
+  .lg  { width: 560px; }
+  .xl  { width: min(820px, 92vw); height: min(560px, 80vh); }
+  .full{ width: 96vw; height: 92vh; }
+  .tall{ width: 240px; height: 85vh; }
+  .wide{ width: 92vw; height: 140px; }
+
+  /* Positioning offsets so stacked popovers are visible on top of each other */
+  .pos-tl { inset: 40px auto auto 40px; margin: 0; }
+  .pos-tr { inset: 60px 40px auto auto; margin: 0; }
+  .pos-bl { inset: auto auto 40px 60px; margin: 0; }
+  .pos-br { inset: auto 60px 60px auto; margin: 0; }
+  .pos-top { inset: 10px 0 auto 0; margin: 0 auto; }
+
+  /* Anchor-positioned tooltip-ish popovers (Chromium 125+) */
+  .anchored { position-area: bottom span-right; margin: 6px 0 0; position-try-fallbacks: flip-block, flip-inline; }
+
+  /* Entry/exit animation */
+  [popover].anim { transition: opacity .2s, transform .2s, overlay .2s allow-discrete, display .2s allow-discrete;
+                   opacity: 0; transform: scale(.94) translateY(8px); }
+  [popover].anim:popover-open { opacity: 1; transform: none; }
+  @starting-style { [popover].anim:popover-open { opacity: 0; transform: scale(.94) translateY(8px); } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Top Layer Playground</h1>
+  <p>Popovers (<code>auto</code> / <code>manual</code> / <code>hint</code>), modal &amp; non-modal dialogs, nesting, light-dismiss, and a z-index trap. The side panel shows what is currently in the top layer and logs every toggle event.</p>
+</header>
+
+<main>
+  <div>
+    <section>
+      <h2>popover="auto" — light-dismiss, one stack at a time</h2>
+      <div class="row">
+        <button popovertarget="a-xs">XS auto</button>
+        <button popovertarget="a-sm">SM auto</button>
+        <button popovertarget="a-md">MD auto (nests)</button>
+        <button popovertarget="a-lg">LG auto</button>
+        <button popovertarget="a-xl">XL auto</button>
+        <button popovertarget="a-tall">Tall auto</button>
+        <button popovertarget="a-wide">Wide auto</button>
+      </div>
+      <p class="hint">Opening an unrelated auto popover closes the others. Opening one from <em>inside</em> another auto popover nests it (both stay open). Esc / outside click closes the topmost chain.</p>
+    </section>
+
+    <section>
+      <h2>popover="manual" — no light-dismiss, stack freely</h2>
+      <div class="row">
+        <button popovertarget="m1" popovertargetaction="toggle">M1 small (TL)</button>
+        <button popovertarget="m2">M2 medium (TR)</button>
+        <button popovertarget="m3">M3 large (BL)</button>
+        <button popovertarget="m4">M4 tall (BR)</button>
+        <button popovertarget="m5">M5 wide (top)</button>
+        <button popovertarget="m6">M6 full-screen</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="primary" id="openAllManual">Open all manual (in order)</button>
+        <button id="openAllManualRev">Open all manual (reverse)</button>
+        <button id="closeAll">Close everything</button>
+      </div>
+      <p class="hint">Last opened = on top. Re-showing an already-open popover does <em>not</em> move it; close + reopen to bring it to the front (or use the "↑ Bring to front" buttons).</p>
+    </section>
+
+    <section>
+      <h2>popover="hint" &amp; anchored</h2>
+      <div class="row">
+        <button popovertarget="h1" popovertargetaction="toggle" id="hintBtn" style="anchor-name:--hintBtn">Hint popover</button>
+        <button popovertarget="anc1" style="anchor-name:--anc1">Anchored auto</button>
+        <button id="hoverBtn" style="anchor-name:--hoverBtn">Hover me (hint via JS)</button>
+      </div>
+      <p class="hint"><code>hint</code> doesn't close open <code>auto</code> popovers (Chromium 133+; falls back to manual elsewhere). Anchoring uses CSS anchor positioning.</p>
+    </section>
+
+    <section>
+      <h2>Dialogs</h2>
+      <div class="row">
+        <button id="dlgModalBtn">showModal() — medium</button>
+        <button id="dlgModalLgBtn">showModal() — large</button>
+        <button id="dlgBtn">show() — non-modal (not top layer!)</button>
+      </div>
+      <p class="hint">Modal dialogs make everything else inert, but popovers opened from inside the dialog still go on top of it.</p>
+    </section>
+
+    <section>
+      <h2>z-index / stacking-context trap</h2>
+      <div class="trap">
+        This box has <code>z-index: 999999</code>, <code>transform</code> and <code>overflow: hidden</code>.
+        Popovers declared <em>inside</em> it still escape to the top layer:
+        <div class="row" style="margin-top:8px">
+          <button popovertarget="trapped">Open trapped popover</button>
+          <button popovertarget="trapped-m">Open trapped manual</button>
+        </div>
+        <div popover id="trapped" class="md pos-top" style="--c:var(--c4)"><div class="pc"><div class="bar"></div>
+          <h3>Escaped! <span class="tag">auto · in .trap</span></h3>
+          <p>Declared inside an overflow-hidden, transformed, z-index:999999 parent — yet rendered above everything, including the fixed red banner.</p>
+          <button popovertarget="trapped">Close</button>
+        </div></div>
+        <div popover="manual" id="trapped-m" class="sm pos-br" style="--c:var(--c4)"><div class="pc"><div class="bar"></div>
+          <h3>Trapped manual <span class="tag">manual · in .trap</span></h3>
+          <p>Also escapes clipping.</p>
+          <button popovertarget="trapped-m">Close</button>
+        </div></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="spawn">Spawn a new manual popover (random size)</button>
+        <button id="spawn10">Spawn 10</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Programmatic</h2>
+      <div class="row">
+        <button id="cycle">Cycle manual popovers to front every 700ms</button>
+        <button id="stopCycle">Stop</button>
+        <button id="popToggleSource">showPopover({source}) on M2</button>
+      </div>
+    </section>
+  </div>
+
+  <aside>
+    <section>
+      <h2>Top layer (bottom → top)</h2>
+      <ol id="stack"></ol>
+      <p class="hint">Tracked from toggle events + dialog open/close, in open order (which is top-layer order).</p>
+    </section>
+    <section>
+      <h2>Event log</h2>
+      <pre id="log"></pre>
+      <div class="row" style="margin-top:8px"><button id="clearLog">Clear log</button></div>
+    </section>
+  </aside>
+</main>
+
+<div class="zbanner">position:fixed; z-index: 2147483647</div>
+
+<!-- ===================== AUTO ===================== -->
+<div popover id="a-xs" class="xs anim" style="--c:var(--c1)"><div class="pc"><div class="bar"></div>
+  <h3>XS <span class="tag">auto</span></h3><p>Tiny one.</p>
+  <button popovertarget="a-xs">Close</button>
+</div></div>
+
+<div popover id="a-sm" class="sm anim" style="--c:var(--c2)"><div class="pc"><div class="bar"></div>
+  <h3>SM <span class="tag">auto</span></h3><p>Open a nested child from here:</p>
+  <div class="row"><button popovertarget="a-xs">→ XS (nested)</button><button popovertarget="a-sm">Close</button></div>
+</div></div>
+
+<div popover id="a-md" class="md anim dim" style="--c:var(--c3)"><div class="pc"><div class="bar"></div>
+  <h3>MD <span class="tag">auto · ::backdrop dimmed</span></h3>
+  <p>Each button opens a child auto popover nested in this one's stack. Children can nest further.</p>
+  <div class="row">
+    <button popovertarget="n1">→ Nested 1</button>
+    <button popovertarget="m1">→ M1 (manual)</button>
+    <button id="openModalFromPopover">→ modal dialog</button>
+    <button popovertarget="a-md">Close</button>
+  </div>
+</div></div>
+
+<div popover id="n1" class="sm pos-tr anim" style="--c:var(--c5)"><div class="pc"><div class="bar"></div>
+  <h3>Nested 1 <span class="tag">auto · child of MD</span></h3>
+  <div class="row"><button popovertarget="n2">→ Nested 2</button><button popovertarget="n1">Close</button></div>
+</div></div>
+<div popover id="n2" class="xs pos-bl anim" style="--c:var(--c6)"><div class="pc"><div class="bar"></div>
+  <h3>Nested 2 <span class="tag">auto</span></h3>
+  <div class="row"><button popovertarget="n3">→ Nested 3</button><button popovertarget="n2">Close</button></div>
+</div></div>
+<div popover id="n3" class="lg pos-br anim" style="--c:var(--c4)"><div class="pc"><div class="bar"></div>
+  <h3>Nested 3 <span class="tag">auto · deepest</span></h3>
+  <p>Press Esc repeatedly to unwind the chain one level at a time. Clicking outside all of them closes the whole chain; clicking on Nested 1 closes only 2 and 3.</p>
+  <button popovertarget="n3">Close</button>
+</div></div>
+
+<div popover id="a-lg" class="lg anim" style="--c:var(--c4)"><div class="pc"><div class="bar"></div>
+  <h3>LG <span class="tag">auto</span></h3>
+  <p>Large popover. Open MD from here to nest a medium inside a large.</p>
+  <div class="row"><button popovertarget="a-md">→ MD (nested)</button><button popovertarget="a-lg">Close</button></div>
+</div></div>
+
+<div popover id="a-xl" class="xl anim dim" style="--c:var(--c6)"><div class="pc"><div class="bar"></div>
+  <h3>XL <span class="tag">auto · scrollable</span></h3>
+  <div class="row" style="margin-bottom:10px">
+    <button popovertarget="a-sm">→ SM</button><button popovertarget="a-lg">→ LG</button><button popovertarget="a-xl">Close</button>
+  </div>
+  <p id="lorem"></p>
+</div></div>
+
+<div popover id="a-tall" class="tall pos-tl anim" style="--c:var(--c5)"><div class="pc"><div class="bar"></div>
+  <h3>Tall <span class="tag">auto</span></h3><p>85vh tall, pinned top-left.</p>
+  <button popovertarget="a-wide">→ Wide</button> <button popovertarget="a-tall">Close</button>
+</div></div>
+
+<div popover id="a-wide" class="wide pos-top anim" style="--c:var(--c2)"><div class="pc"><div class="bar"></div>
+  <h3>Wide <span class="tag">auto</span></h3><p>92vw wide strip at the top.</p>
+  <button popovertarget="a-tall">→ Tall</button> <button popovertarget="a-wide">Close</button>
+</div></div>
+
+<!-- ===================== MANUAL ===================== -->
+<div popover="manual" id="m1" class="xs pos-tl" style="--c:var(--c1)"><div class="pc"><div class="bar"></div>
+  <h3>M1 <span class="tag">manual · XS</span></h3>
+  <div class="row"><button data-front="m1">↑ Bring to front</button><button popovertarget="m1">Close</button></div>
+</div></div>
+<div popover="manual" id="m2" class="md pos-tr" style="--c:var(--c2)"><div class="pc"><div class="bar"></div>
+  <h3>M2 <span class="tag">manual · MD</span></h3>
+  <p>Open an auto popover from here — it won't close any manual popovers.</p>
+  <div class="row"><button popovertarget="a-sm">→ SM auto</button><button data-front="m2">↑ Bring to front</button><button popovertarget="m2">Close</button></div>
+</div></div>
+<div popover="manual" id="m3" class="lg pos-bl" style="--c:var(--c3)"><div class="pc"><div class="bar"></div>
+  <h3>M3 <span class="tag">manual · LG</span></h3>
+  <p>Large manual popover anchored bottom-left.</p>
+  <div class="row"><button popovertarget="m1">Toggle M1</button><button popovertarget="m4">Toggle M4</button><button data-front="m3">↑ Bring to front</button><button popovertarget="m3">Close</button></div>
+</div></div>
+<div popover="manual" id="m4" class="tall pos-br" style="--c:var(--c4)"><div class="pc"><div class="bar"></div>
+  <h3>M4 <span class="tag">manual · tall</span></h3>
+  <div class="row"><button data-front="m4">↑ Bring to front</button><button popovertarget="m4">Close</button></div>
+</div></div>
+<div popover="manual" id="m5" class="wide pos-top" style="--c:var(--c5)"><div class="pc"><div class="bar"></div>
+  <h3>M5 <span class="tag">manual · wide</span></h3>
+  <div class="row"><button data-front="m5">↑ Bring to front</button><button popovertarget="m5">Close</button></div>
+</div></div>
+<div popover="manual" id="m6" class="full" style="--c:var(--c6)"><div class="pc"><div class="bar"></div>
+  <h3>M6 <span class="tag">manual · full-screen</span></h3>
+  <p>Covers almost everything. Open others from here to put them on top.</p>
+  <div class="row">
+    <button popovertarget="m1">Toggle M1</button><button popovertarget="m2">Toggle M2</button>
+    <button popovertarget="a-md">Open MD auto</button><button id="modalFromM6">Open modal</button>
+    <button data-front="m6">↑ Bring to front</button><button popovertarget="m6">Close</button>
+  </div>
+</div></div>
+
+<!-- ===================== HINT / ANCHORED ===================== -->
+<div popover="hint" id="h1" class="sm anchored" style="position-anchor:--hintBtn; --c:var(--c3)"><div class="pc"><div class="bar"></div>
+  <h3>Hint <span class="tag">hint</span></h3><p>Open an auto popover first, then this — the auto one stays open.</p>
+</div></div>
+<div popover id="anc1" class="sm anchored" style="position-anchor:--anc1; --c:var(--c1)"><div class="pc"><div class="bar"></div>
+  <h3>Anchored <span class="tag">auto</span></h3>
+  <button popovertarget="anc2" style="anchor-name:--anc2">→ anchored child</button>
+</div></div>
+<div popover id="anc2" class="xs anchored" style="position-anchor:--anc2; --c:var(--c2)"><div class="pc"><div class="bar"></div>
+  <h3>Child <span class="tag">auto</span></h3><p>Anchored to the button in its parent.</p>
+</div></div>
+<div popover="hint" id="hover-tip" class="xs anchored" style="position-anchor:--hoverBtn; --c:var(--c5)"><div class="pc">
+  <p style="margin:0">Hover tooltip in the top layer.</p>
+</div></div>
+
+<!-- ===================== DIALOGS ===================== -->
+<dialog id="dlgModal" class="md" style="--c:var(--c1)"><div class="pc"><div class="bar"></div>
+  <h3>Modal dialog <span class="tag">showModal()</span></h3>
+  <p>The page behind is inert. Popovers opened from here still stack above this dialog.</p>
+  <div class="row">
+    <button popovertarget="a-sm">→ SM auto</button>
+    <button popovertarget="m2">→ M2 manual</button>
+    <button id="nestedModal">→ another modal</button>
+    <button onclick="this.closest('dialog').close()">Close</button>
+  </div>
+</div></dialog>
+<dialog id="dlgModal2" class="sm" style="--c:var(--c4)"><div class="pc"><div class="bar"></div>
+  <h3>Modal #2 <span class="tag">showModal()</span></h3>
+  <p>Modal on top of a modal.</p>
+  <button onclick="this.closest('dialog').close()">Close</button>
+</div></dialog>
+<dialog id="dlgModalLg" class="xl" style="--c:var(--c3)"><div class="pc"><div class="bar"></div>
+  <h3>Large modal <span class="tag">showModal()</span></h3>
+  <div class="row"><button popovertarget="a-xl">→ XL auto</button><button popovertarget="m6">→ M6 full manual</button>
+  <button onclick="this.closest('dialog').close()">Close</button></div>
+</div></dialog>
+<dialog id="dlg" class="sm" style="--c:var(--c5); position:fixed; inset:auto 20px 80px auto; margin:0;"><div class="pc"><div class="bar"></div>
+  <h3>Non-modal <span class="tag">show()</span></h3>
+  <p>Not in the top layer — the red fixed banner can cover it; popovers go above it.</p>
+  <button onclick="this.closest('dialog').close()">Close</button>
+</div></dialog>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const logEl = $('#log'), stackEl = $('#stack');
+  const order = []; // elements in top-layer order
+
+  function log(msg) {
+    const t = new Date().toISOString().slice(11, 23);
+    logEl.textContent += `${t}  ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function label(el) {
+    const kind = el.tagName === 'DIALOG' ? 'dialog' : `popover=${el.getAttribute('popover') || 'auto'}`;
+    return `#${el.id}  (${kind})`;
+  }
+  function render() {
+    stackEl.innerHTML = '';
+    if (!order.length) { stackEl.innerHTML = '<li class="empty">empty</li>'; return; }
+    order.forEach((el) => {
+      const li = document.createElement('li');
+      li.textContent = label(el);
+      li.style.setProperty('--c', getComputedStyle(el).getPropertyValue('--c') || '#999');
+      stackEl.appendChild(li);
+    });
+  }
+  function track(el, open) {
+    const i = order.indexOf(el);
+    if (i >= 0) order.splice(i, 1);
+    if (open) order.push(el);
+    render();
+  }
+
+  // Popover toggle events
+  document.querySelectorAll('[popover]').forEach(wire);
+  function wire(p) {
+    p.addEventListener('beforetoggle', (e) => log(`beforetoggle ${p.id}: ${e.oldState} → ${e.newState}`));
+    p.addEventListener('toggle', (e) => { log(`toggle       ${p.id}: ${e.newState}`); track(p, e.newState === 'open'); });
+  }
+  // Dialogs: watch the open attribute
+  document.querySelectorAll('dialog').forEach((d) => {
+    new MutationObserver(() => {
+      const modal = d.matches(':modal');
+      log(`dialog ${d.id}: ${d.open ? (modal ? 'showModal' : 'show') : 'close'}`);
+      if (modal || !d.open) track(d, d.open && modal);
+    }).observe(d, { attributes: true, attributeFilter: ['open'] });
+  });
+
+  // Manual helpers
+  const manualIds = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6'];
+  const show = (el) => { if (!el.matches(':popover-open')) el.showPopover(); };
+  const front = (el) => { if (el.matches(':popover-open')) el.hidePopover(); el.showPopover(); };
+  $('#openAllManual').onclick = () => manualIds.forEach((id) => show(document.getElementById(id)));
+  $('#openAllManualRev').onclick = () => [...manualIds].reverse().forEach((id) => show(document.getElementById(id)));
+  $('#closeAll').onclick = () => {
+    document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+    document.querySelectorAll(':popover-open').forEach((p) => p.hidePopover());
+  };
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-front]');
+    if (b) front(document.getElementById(b.dataset.front));
+  });
+
+  // Dialogs
+  $('#dlgModalBtn').onclick = () => $('#dlgModal').showModal();
+  $('#dlgModalLgBtn').onclick = () => $('#dlgModalLg').showModal();
+  $('#dlgBtn').onclick = () => $('#dlg').show();
+  $('#nestedModal').onclick = () => $('#dlgModal2').showModal();
+  $('#openModalFromPopover').onclick = () => $('#dlgModal').showModal();
+  $('#modalFromM6').onclick = () => $('#dlgModal').showModal();
+
+  // Hover hint
+  const hoverTip = $('#hover-tip');
+  $('#hoverBtn').addEventListener('mouseenter', () => show(hoverTip));
+  $('#hoverBtn').addEventListener('mouseleave', () => hoverTip.matches(':popover-open') && hoverTip.hidePopover());
+
+  // Spawner
+  let spawnN = 0;
+  const colors = ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6'];
+  function spawn() {
+    const n = ++spawnN;
+    const p = document.createElement('div');
+    p.popover = 'manual';
+    p.id = `s${n}`;
+    const w = 140 + Math.random() * 420, h = 90 + Math.random() * 320;
+    const x = Math.random() * Math.max(0, innerWidth - w), y = Math.random() * Math.max(0, innerHeight - h);
+    Object.assign(p.style, { width: `${w}px`, height: `${h}px`, inset: `${y}px auto auto ${x}px`, margin: 0 });
+    p.style.setProperty('--c', `var(${colors[n % colors.length]})`);
+    p.innerHTML = `<div class="pc"><div class="bar"></div><h3>Spawned #${n} <span class="tag">manual · ${w|0}×${h|0}</span></h3>
+      <div class="row"><button data-front="${p.id}">↑ Front</button><button popovertarget="${p.id}">Close</button>
+      <button class="rm">Remove from DOM</button></div></div>`;
+    p.querySelector('.rm').onclick = () => { log(`removed ${p.id} from DOM`); p.remove(); track(p, false); };
+    document.body.appendChild(p);
+    wire(p);
+    p.showPopover();
+  }
+  $('#spawn').onclick = spawn;
+  $('#spawn10').onclick = () => { for (let i = 0; i < 10; i++) spawn(); };
+
+  // Cycling
+  let cycleTimer = null, ci = 0;
+  $('#cycle').onclick = () => {
+    clearInterval(cycleTimer);
+    cycleTimer = setInterval(() => {
+      const open = [...document.querySelectorAll('[popover="manual"]:popover-open')];
+      if (!open.length) return;
+      front(open[ci++ % open.length]);
+    }, 700);
+  };
+  $('#stopCycle').onclick = () => clearInterval(cycleTimer);
+
+  $('#popToggleSource').onclick = (e) => {
+    const m2 = $('#m2');
+    if (m2.matches(':popover-open')) m2.hidePopover();
+    try { m2.showPopover({ source: e.currentTarget }); } catch { m2.showPopover(); }
+  };
+
+  $('#clearLog').onclick = () => (logEl.textContent = '');
+  $('#lorem').textContent = 'Scroll content. '.repeat(400);
+  render();
+</script>
+</body>
+</html>
